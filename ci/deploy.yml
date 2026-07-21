@@ -1,0 +1,39 @@
+# Move this file to .github/workflows/deploy.yml (requires a token/login with 'workflow' scope).
+# It was staged here because the automation token lacked workflow-write permission.
+
+name: Deploy to WordPress.org
+
+# Publishes a tagged GitHub Release to the plugin's WordPress.org SVN repo:
+# code → trunk + tags/<version>, and .wordpress-org/ images → SVN /assets.
+# This is a clean free-core plugin (Model B) — the repo tree IS the shipped payload,
+# so the 10up action deploys it directly (everything except .distignore entries).
+# Requires repo secrets SVN_USERNAME and SVN_PASSWORD (your wordpress.org login).
+# Only runs after the plugin is approved and the SVN repo exists.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    name: Deploy to wordpress.org
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: WordPress Plugin Deploy
+        id: deploy
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        with:
+          generate-zip: true
+        env:
+          SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+          SLUG: steadysync-for-square
+
+      - name: Upload release ZIP as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: steadysync-for-square
+          path: ${{ steps.deploy.outputs.zip-path }}
