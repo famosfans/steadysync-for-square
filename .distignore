@@ -1,0 +1,11 @@
+# Files NOT deployed to the WordPress.org SVN trunk (dev-only / repo-only).
+# The 10up deploy action ships everything EXCEPT these.
+/.github
+/.git
+/.gitignore
+/.distignore
+/.wordpress-org
+/tests
+/dist
+/README.md
+.DS_Store
