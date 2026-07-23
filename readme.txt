@@ -50,8 +50,8 @@ The plugin also **receives** webhook notifications from Square at a REST endpoin
 
 Square's terms and privacy policy:
 
-* Square Developer Terms of Service: https://developer.squareup.com/us/en/terms
-* Square Privacy Policy: https://squareup.com/us/en/legal/general/privacy
+* Square Terms of Service: https://squareup.com/us/en/legal/general/ua
+* Square Privacy Notice: https://squareup.com/us/en/legal/general/privacy
 
 == Installation ==
 

@@ -16,9 +16,7 @@ class Settings {
 	public static function defaults(): array {
 		return array(
 			'environment'      => 'sandbox',      // sandbox | production
-			'location_id'      => '',             // PRIMARY-Location: Push-/Order-Ziel + Fallback.
-			'locations'        => array(),        // Multi-Location: alle Locations, die in den WC-Bestand zählen.
-			'inventory_mode'   => 'single',       // single (nur Primary) | aggregate (Summe über locations).
+			'location_id'      => '',             // Location, deren Square-Bestand in den WooCommerce-Stock gespiegelt wird.
 			'system_of_record' => 'square',       // square | woocommerce (Konflikt-Master)
 			'realtime'         => 'yes',           // webhook-getriebenes Real-Time (bei uns INKLUSIVE)
 			'webhook_url'      => '',

@@ -294,11 +294,10 @@ class Admin {
 
 		/**
 		 * Lets add-ons persist their own posted settings fields. The core nonce
-		 * `steadysync_save` has already been verified at this point.
-		 *
-		 * @param array $post The $_POST payload (unslashed by the add-on as needed).
+		 * `steadysync_save` has already been verified at this point. Add-ons read and
+		 * sanitize the specific fields they own from $_POST themselves.
 		 */
-		do_action( 'steadysync_admin_save', $_POST ); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+		do_action( 'steadysync_admin_save' );
 
 		wp_safe_redirect(
 			add_query_arg(

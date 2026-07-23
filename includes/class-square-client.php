@@ -1,7 +1,11 @@
 <?php
 /**
  * Dünner Square-API-Client (wp_remote_*). Sandbox/Prod via Settings.
- * Bewusst schlank: keine Riesen-SDK-Abhängigkeit (der Bloat-Vorwurf gegen Konkurrenten).
+ * Bewusst schlank: keine große SDK-Abhängigkeit, nur die WP-HTTP-API.
+ *
+ * Enthält ausschließlich die vom kostenlosen Kern genutzten Lese-/OAuth-Aufrufe
+ * (Square → WooCommerce). Die HTTP-Plumbing ist protected, damit ein optionales
+ * Add-on den Client erweitern kann, ohne dass Zusatzfunktionen hier mitgeliefert werden.
  */
 namespace Steadysync;
 
@@ -11,13 +15,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class Square_Client {
 
-	private const SQUARE_VERSION = '2025-04-16';
+	protected const SQUARE_VERSION = '2025-04-16';
 
-	public function __construct( private Settings $settings ) {}
+	public function __construct( protected Settings $settings ) {}
 
-	private function request( string $method, string $path, ?array $body = null, bool $authless = false ) {
+	protected function request( string $method, string $path, ?array $body = null, bool $authless = false ) {
 		$headers = array(
-			'Square-Version' => self::SQUARE_VERSION,
+			'Square-Version' => static::SQUARE_VERSION,
 			'Content-Type'   => 'application/json',
 		);
 		// OAuth-Token-Endpoints (/oauth2/token) authentifizieren über client_id/secret im Body,
@@ -109,78 +113,6 @@ class Square_Client {
 		return (array) $this->request( 'POST', '/v2/catalog/search', $body );
 	}
 
-	/** Setzt den physischen Bestand einer Variation in Square (Push Woo → Square). */
-	public function set_inventory_count( string $variation_id, string $location_id, int $qty ) {
-		return $this->request(
-			'POST',
-			'/v2/inventory/changes/batch-create',
-			array(
-				'idempotency_key' => wp_generate_uuid4(),
-				'changes'         => array(
-					array(
-						'type'           => 'PHYSICAL_COUNT',
-						'physical_count' => array(
-							'catalog_object_id' => $variation_id,
-							'state'             => 'IN_STOCK',
-							'location_id'       => $location_id,
-							'quantity'          => (string) $qty,
-							'occurred_at'       => gmdate( 'c' ),
-						),
-					),
-				),
-			)
-		);
-	}
-
-	/** Aktuellen Square-Bestand einer Variation lesen (für Verifikation/Konfliktlösung). */
-	public function get_inventory_count( string $variation_id, string $location_id ) {
-		$r      = $this->request(
-			'POST',
-			'/v2/inventory/counts/batch-retrieve',
-			array(
-				'catalog_object_ids' => array( $variation_id ),
-				'location_ids'       => array( $location_id ),
-			)
-		);
-		$counts = is_array( $r ) ? ( $r['counts'] ?? array() ) : array();
-		return $counts[0]['quantity'] ?? null;
-	}
-
-	/**
-	 * Summiert den IN_STOCK-Bestand einer Variation über mehrere Locations (Multi-Location-Aggregat).
-	 * Nur der IN_STOCK-State zählt (verkaufsfähig) — SOLD/WASTE etc. bleiben außen vor.
-	 *
-	 * @param string[] $location_ids
-	 * @return int|null Summe, oder null wenn Square einen Fehler lieferte (dann NICHT anwenden → Anti-Zeroing).
-	 */
-	public function get_inventory_sum( string $variation_id, array $location_ids ) {
-		if ( empty( $location_ids ) ) {
-			return null;
-		}
-		$r = $this->request(
-			'POST',
-			'/v2/inventory/counts/batch-retrieve',
-			array(
-				'catalog_object_ids' => array( $variation_id ),
-				'location_ids'       => array_values( $location_ids ),
-			)
-		);
-		if ( is_wp_error( $r ) || ! is_array( $r ) || ! empty( $r['errors'] ) ) {
-			return null;
-		}
-		// Anti-Zeroing: „keine IN_STOCK-Zeile" (untracked) ist NICHT dasselbe wie echte 0.
-		// Nur wenn Square mindestens eine IN_STOCK-Zeile liefert, ist die Summe autoritativ.
-		$sum   = 0;
-		$found = false;
-		foreach ( $r['counts'] ?? array() as $c ) {
-			if ( 'IN_STOCK' === ( $c['state'] ?? '' ) && is_numeric( $c['quantity'] ?? null ) ) {
-				$sum  += (int) $c['quantity'];
-				$found = true;
-			}
-		}
-		return $found ? $sum : null;
-	}
-
 	/**
 	 * Gebatchter IN_STOCK-Read: viele Variationen in EINEM Call (für Diff-Vorschau ohne N Requests).
 	 * Square erlaubt mehrere catalog_object_ids pro batch-retrieve; wir paginieren in 100er-Blöcken.
@@ -223,120 +155,6 @@ class Square_Client {
 			} while ( $cursor && $guard++ < 50 );
 		}
 		return $out;
-	}
-
-	/**
-	 * Relativer Inventar-ADJUSTMENT (Zustandsübergang), z. B. IN_STOCK → SOLD bei einer
-	 * WooCommerce-Bestellung. Anders als PHYSICAL_COUNT (absolut überschreiben) schreibt das
-	 * einen echten Verkaufs-Eintrag in Squares Inventar-Ledger — korrekte Verkaufs-/COGS-Reports
-	 * statt opaker Neuzählungen (der Weg, den das offizielle Plugin NICHT geht).
-	 * $idempotency_key stabil pro Order+Variation → Square dedupliziert Retries automatisch.
-	 */
-	public function adjust_inventory( string $variation_id, string $location_id, int $qty, string $from_state, string $to_state, string $idempotency_key ) {
-		return $this->request(
-			'POST',
-			'/v2/inventory/changes/batch-create',
-			array(
-				'idempotency_key' => $idempotency_key,
-				'changes'         => array(
-					array(
-						'type'       => 'ADJUSTMENT',
-						'adjustment' => array(
-							'catalog_object_id' => $variation_id,
-							'from_state'        => $from_state,
-							'to_state'          => $to_state,
-							'location_id'       => $location_id,
-							'quantity'          => (string) $qty,
-							'occurred_at'       => gmdate( 'c' ),
-						),
-					),
-				),
-			)
-		);
-	}
-
-	/**
-	 * Einzelnes Katalog-Objekt inkl. verschachtelter Objekte (ITEM bringt seine VARIATIONs mit,
-	 * jeweils mit `version` für optimistische Nebenläufigkeit). Basis für den Woo→Square-Katalog-Push.
-	 */
-	public function get_catalog_object( string $object_id, bool $include_related = false ) {
-		$q = $include_related ? '?include_related_objects=true' : '';
-		return $this->request( 'GET', '/v2/catalog/object/' . rawurlencode( $object_id ) . $q );
-	}
-
-	/**
-	 * Upsert eines Katalog-Objekts (mit verschachtelten VARIATIONs möglich). Jedes Objekt muss
-	 * seine aktuelle `version` mitführen (aus get_catalog_object) — sonst Versionskonflikt.
-	 */
-	public function upsert_catalog_object( array $catalog_object ) {
-		return $this->request(
-			'POST',
-			'/v2/catalog/object',
-			array(
-				'idempotency_key' => wp_generate_uuid4(),
-				'object'          => $catalog_object,
-			)
-		);
-	}
-
-	/**
-	 * Lädt ein lokales Bild als Square-Katalog-Bild hoch und heftet es an ein ITEM (Bild-Push Woo→Square).
-	 * Multipart-Upload (kein JSON) — bewusst über wp_remote_post statt request().
-	 *
-	 * @return array|\WP_Error Square-Antwort oder Fehler.
-	 */
-	public function create_catalog_image( string $object_id, string $file_path, string $caption = '' ) {
-		if ( ! is_readable( $file_path ) ) {
-			return new \WP_Error( 'steadysync_no_file', 'Bilddatei nicht lesbar: ' . $file_path );
-		}
-		$data = file_get_contents( $file_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- lokale Binärdatei.
-		if ( false === $data ) {
-			return new \WP_Error( 'steadysync_read_fail', 'Bilddatei nicht lesbar.' );
-		}
-
-		$boundary = 'steadysync' . wp_generate_password( 20, false );
-		$detected = wp_check_filetype( $file_path )['type'];
-		$mime     = $detected ? $detected : 'image/jpeg';
-		$name     = basename( $file_path );
-		$request  = wp_json_encode(
-			array(
-				'idempotency_key' => wp_generate_uuid4(),
-				'object_id'       => $object_id,
-				'image'           => array(
-					'type'       => 'IMAGE',
-					'id'         => '#steadysync_img',
-					'image_data' => array( 'caption' => $caption ),
-				),
-			)
-		);
-
-		$eol   = "\r\n";
-		$parts = '--' . $boundary . $eol;
-		$parts .= 'Content-Disposition: form-data; name="request"' . $eol;
-		$parts .= 'Content-Type: application/json' . $eol . $eol;
-		$parts .= $request . $eol;
-		$parts .= '--' . $boundary . $eol;
-		$parts .= 'Content-Disposition: form-data; name="image_file"; filename="' . $name . '"' . $eol;
-		$parts .= 'Content-Type: ' . $mime . $eol . $eol;
-		$parts .= $data . $eol;
-		$parts .= '--' . $boundary . '--' . $eol;
-
-		$res = wp_remote_post(
-			$this->settings->api_base() . '/v2/catalog/images',
-			array(
-				'timeout' => 30,
-				'headers' => array(
-					'Authorization'  => 'Bearer ' . $this->settings->access_token(),
-					'Square-Version' => self::SQUARE_VERSION,
-					'Content-Type'   => 'multipart/form-data; boundary=' . $boundary,
-				),
-				'body'    => $parts,
-			)
-		);
-		if ( is_wp_error( $res ) ) {
-			return $res;
-		}
-		return json_decode( wp_remote_retrieve_body( $res ), true );
 	}
 
 	/** OAuth-Token-Refresh (production). Gibt [access_token, refresh_token, expires_at] oder WP_Error. */
