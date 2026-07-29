@@ -1,6 +1,3 @@
-# Move this file to .github/workflows/deploy.yml (requires a token/login with 'workflow' scope).
-# It was staged here because the automation token lacked workflow-write permission.
-
 name: Deploy to WordPress.org
 
 # Publishes a tagged GitHub Release to the plugin's WordPress.org SVN repo:
